@@ -1,4 +1,4 @@
-//import DStorage from '../abis/DStorage.json'
+import DStorage from '../abis/DStorage.json'
 import React, { Component } from 'react';
 import Navbar from './Navbar'
 import Main from './Main'
@@ -6,7 +6,8 @@ import Web3 from 'web3';
 import './App.css';
 
 //Declare IPFS
-
+const ipfsClient = require('ipfs-http-client')
+const ipfs = ipfsClient({ host: 'ipfs.infura.io', port: 5001, protocol: 'https' }) 
 class App extends Component {
 
   async componentWillMount() {
@@ -15,30 +16,64 @@ class App extends Component {
   }
 
   async loadWeb3() {
-    //Setting up Web3
+    if (window.ethereum) {
+      window.web3 = new Web3(window.ethereum)
+      await window.ethereum.enable()
+    }
+    else if (window.web3) {
+      window.web3 = new Web3(window.web3.currentProvider)
+    }
+    else {
+      window.alert('Non-Ethereum browser detected. You should consider trying MetaMask!')
+    }
   }
 
   async loadBlockchainData() {
-    //Declare Web3
-
-    //Load account
-
-    //Network ID
-
-    //IF got connection, get data from contracts
-      //Assign contract
-
-      //Get files amount
-
-      //Load files&sort by the newest
-
-    //Else
-      //alert Error
+    const web3 = window.web3
+    // Load account
+    const accounts = await web3.eth.getAccounts()
+    this.setState({ account: accounts[0] })
+    // Network ID
+    const networkId = await web3.eth.net.getId()
+    const networkData = DStorage.networks[networkId]
+    if(networkData) {
+      // Assign contract
+      const dstorage = new web3.eth.Contract(DStorage.abi, networkData.address)
+      this.setState({ dstorage })
+      // Get files amount
+      const filesCount = await dstorage.methods.fileCount().call()
+      this.setState({ filesCount })
+      // Load files&sort by the newest
+      for (var i = filesCount; i >= 1; i--) {
+        const file = await dstorage.methods.files(i).call()
+        this.setState({
+          files: [...this.state.files, file]
+        })
+      }
+    } else {
+      window.alert('DStorage contract not deployed to detected network.')
+    }
+    this.setState({loading:false})
 
   }
 
   // Get file from user
   captureFile = event => {
+    event.preventDefault()
+
+    const file = event.target.files[0]
+    console.log('file',event.target.files)
+    const reader = new window.FileReader()
+
+    reader.readAsArrayBuffer(file)
+    reader.onloadend = ()=>{
+      this.setState({
+        buffer : Buffer(reader.result),
+        type : file.type,
+        name : file.name
+      })
+      console.log('buffer',this.state.buffer)
+    } 
   }
 
 
@@ -46,15 +81,37 @@ class App extends Component {
   uploadFile = description => {
 
     //Add file to the IPFS
-
-      //Check If error
-        //Return error
-
-      //Set state to loading
+    ipfs.add(this.state.buffer,(error,result)=>{
+      console.log('ipfs result: ',result)
+      if(error){
+        console.error(error)
+        return
+      }
+      this.setState({loading:true})
 
       //Assign value for the file without extension
+      if(this.state.type === ''){
+        this.setState({type:'none'})
+      }
 
       //Call smart contract uploadFile function 
+      this.state.dstorage.methods.uploadFile(result[0].hash, result[0].size, this.state.type, this.state.name, description).send({from:this.state.account}).on('transactionHash',(hash)=>{
+        this.setState({
+          loading:false,
+          type:null,
+          name:null
+        })
+        window.location.reload()
+      }).on('error',(e)=>{
+        window.alert('Error')
+        this.setState({loading:false})
+      })
+
+    })
+
+     
+
+     
 
   }
 
@@ -62,6 +119,12 @@ class App extends Component {
   constructor(props) {
     super(props)
     this.state = {
+      account:'',
+      dstorage:null,
+      files:[],
+      loading:false,
+      type: null,
+      name: null
     }
 
     //Bind functions
